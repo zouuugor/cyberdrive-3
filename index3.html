@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CarPlay Cyberpunk - C4 Grand Picasso</title>
+    
+    <!-- PWA Settings -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#08080C">
+    
+    <!-- Google Fonts Sci-Fi & Modernes -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        cp: {
+                            yellow: '#FCEE09',
+                            cyan: '#00F0FF',
+                            pink: '#FF0055',
+                            dark: '#08080C',
+                            card: '#101218',
+                            border: '#1E2430'
+                        }
+                    },
+                    fontFamily: {
+                        orbitron: ['Orbitron', 'sans-serif'],
+                        rajdhani: ['Rajdhani', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+    
+    <style>
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            touch-action: manipulation;
+            font-family: 'Rajdhani', sans-serif;
+            background-color: #08080C;
+        }
+
+        /* Formes Cyberpunk coupées */
+        .cp-cut {
+            clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+        }
+
+        /* Glows lisses */
+        .glow-yellow { box-shadow: 0 0 15px rgba(252, 238, 9, 0.25); }
+        .glow-cyan { box-shadow: 0 0 15px rgba(0, 240, 255, 0.25); }
+        .glow-pink { box-shadow: 0 0 15px rgba(255, 0, 85, 0.25); }
+        .text-glow-cyan { text-shadow: 0 0 12px rgba(0, 240, 255, 0.6); }
+
+        /* Conteneur de la Carte GPS */
+        #real-time-map {
+            width: 100%;
+            height: 100%;
+            min-height: 250px;
+            background: #05070a;
+            z-index: 0;
+        }
+
+        /* Transformation des tuiles OpenStreetMap standard en carte Style Cyberpunk Neon Dark */
+        .leaflet-tile-container img {
+            filter: invert(100%) hue-rotate(180deg) brightness(0.9) contrast(1.5) saturate(2);
+        }
+
+        .leaflet-control-container .leaflet-routing-container-hide { display: none; }
+        .leaflet-control-attribution { display: none !important; }
+
+        ::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="text-slate-100 min-h-screen w-screen flex flex-col justify-between p-2 sm:p-3 md:p-5 overflow-x-hidden md:overflow-hidden">
+
+    <!-- EN-TÊTE SUPÉRIEUR -->
+    <header class="flex flex-wrap justify-between items-center bg-cp-card border-b-2 border-cp-yellow px-3 sm:px-5 py-2 rounded-xl glow-yellow mb-2 sm:mb-3 gap-2">
+        <div class="flex items-center space-x-2 sm:space-x-3">
+            <i class="fa-solid fa-car-side text-xl sm:text-2xl text-cp-yellow"></i>
+            <div>
+                <h1 class="font-orbitron text-sm sm:text-base md:text-xl font-black tracking-widest text-cp-yellow uppercase">C4 GRAND PICASSO</h1>
+                <p id="gps-status" class="text-[10px] sm:text-xs text-cp-cyan font-semibold tracking-wider flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-cp-cyan animate-pulse"></span> GPS ACTIF
+                </p>
+            </div>
+        </div>
+
+        <!-- Heure + Date + Batterie combinées -->
+        <div class="flex items-center space-x-2 sm:space-x-4">
+            <div class="bg-black/60 border border-cp-cyan/40 px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-lg flex items-center gap-2 sm:gap-3">
+                <i class="fa-solid fa-clock text-cp-cyan text-xs sm:text-base"></i>
+                <span id="header-datetime" class="font-orbitron font-bold text-xs sm:text-sm md:text-lg text-cp-cyan tracking-wider">--:-- - --/--</span>
+            </div>
+
+            <!-- Batterie -->
+            <div class="flex items-center space-x-1.5 bg-black/60 border border-cp-border px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg">
+                <i id="battery-icon" class="fa-solid fa-battery-full text-cp-yellow text-sm sm:text-lg"></i>
+                <span id="battery-level" class="font-orbitron text-[10px] sm:text-xs font-bold text-cp-yellow">--%</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- ZONE PRINCIPALE -->
+    <main class="grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-5 my-1 flex-grow overflow-y-auto md:overflow-hidden">
+
+        <!-- COLONNE GAUCHE (CARTE GPS EN DIRECT OPENSTREETMAP - CLIC = OUVRIR WAZE) -->
+        <section onclick="openWaze()" class="md:col-span-6 bg-cp-card border-2 border-cp-cyan/50 hover:border-cp-cyan rounded-2xl p-2 sm:p-3 flex flex-col justify-between cp-cut glow-cyan relative overflow-hidden cursor-pointer group min-h-[300px] md:min-h-0">
+            
+            <!-- Vraie Carte Routière en Temps Réel -->
+            <div class="absolute inset-0 z-0">
+                <div id="real-time-map"></div>
+            </div>
+
+            <!-- Superposition d'informations (Header Carte) -->
+            <div class="relative z-10 flex justify-between items-center text-[10px] sm:text-xs font-orbitron text-cp-cyan bg-black/85 p-2 rounded-xl border border-cp-cyan/40 backdrop-blur-md pointer-events-none">
+                <span class="tracking-widest flex items-center gap-2 font-bold text-cp-yellow truncate">
+                    <span class="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-cp-yellow animate-ping flex-shrink-0"></span>
+                    CARTE GPS EN DIRECT
+                </span>
+                <span class="text-cp-cyan font-bold uppercase tracking-wider bg-cp-cyan/20 px-2 py-0.5 sm:py-1 rounded border border-cp-cyan/40 text-[9px] sm:text-[10px] flex-shrink-0">
+                    WAZE <i class="fa-solid fa-arrow-up-right-from-square ml-1"></i>
+                </span>
+            </div>
+
+            <!-- Contenu bas : Simulation à gauche & Vitesse réduite à droite -->
+            <div class="relative z-10 flex justify-between items-end mt-auto pointer-events-none">
+                <!-- Bouton simulation à gauche -->
+                <button id="sim-speed-btn" onclick="event.stopPropagation(); toggleSim();" class="px-2.5 sm:px-3 py-1 sm:py-1.5 bg-black/85 text-cp-yellow border border-cp-yellow/50 rounded-xl hover:bg-cp-yellow font-orbitron font-bold text-[10px] sm:text-xs tracking-wider backdrop-blur-md pointer-events-auto transition">
+                    TEST SIM
+                </button>
+
+                <!-- Affichage de la vitesse compact en bas à droite -->
+                <div class="bg-black/85 border-2 border-cp-cyan p-2 sm:p-2.5 rounded-2xl backdrop-blur-md glow-cyan flex items-baseline gap-1.5 sm:gap-2 pointer-events-none">
+                    <span id="speed-display" class="font-orbitron text-2xl sm:text-3xl font-black text-white text-glow-cyan tracking-tighter">0</span>
+                    <span class="font-orbitron text-cp-yellow font-black tracking-widest text-[10px] sm:text-xs">KM/H</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- COLONNE DROITE (MUSIQUE + DOCK APPLICATIONS) -->
+        <section class="md:col-span-6 flex flex-col justify-between gap-3 md:gap-4">
+
+            <!-- LECTEUR MUSICAL -->
+            <div class="bg-cp-card border-2 border-cp-border hover:border-cp-pink/60 rounded-2xl p-3 sm:p-4 md:p-5 glow-pink flex flex-col justify-between transition">
+                <div class="flex items-center space-x-3 sm:space-x-4">
+                    <img id="album-art" src="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&auto=format&fit=crop&q=80" alt="Cover" class="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover border border-cp-pink/50 flex-shrink-0">
+                    <div class="flex-grow min-w-0">
+                        <span class="font-orbitron text-[10px] sm:text-xs font-bold text-cp-pink tracking-widest uppercase">AUDIOMATRIX</span>
+                        <h2 id="song-title" class="font-orbitron text-base sm:text-lg font-bold text-white truncate">Night City Drive</h2>
+                        <p id="song-artist" class="text-xs sm:text-sm text-slate-400 truncate">Cyberpunk Soundtrack</p>
+
+                        <div class="mt-1.5 sm:mt-2">
+                            <div class="w-full bg-black/60 rounded-full h-1.5 sm:h-2 cursor-pointer overflow-hidden border border-cp-border" id="progress-container">
+                                <div id="progress-bar" class="bg-cp-pink h-full w-1/3 transition-all duration-300"></div>
+                            </div>
+                            <div class="flex justify-between text-[10px] sm:text-xs font-orbitron text-slate-400 mt-0.5 sm:mt-1">
+                                <span id="current-time">1:15</span>
+                                <span id="total-time">3:45</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Contrôles audio -->
+                <div class="flex items-center justify-around mt-2 sm:mt-3 pt-2 border-t border-cp-border">
+                    <button id="btn-prev" onclick="prevSong()" class="p-2 sm:p-3 text-slate-300 hover:text-cp-pink text-lg sm:text-xl transition"><i class="fa-solid fa-backward-step"></i></button>
+                    <button id="btn-play" onclick="togglePlay()" class="p-3 sm:p-4 bg-cp-pink text-white rounded-xl text-lg sm:text-xl glow-pink active:scale-95 transition"><i id="play-icon" class="fa-solid fa-play"></i></button>
+                    <button id="btn-next" onclick="nextSong()" class="p-2 sm:p-3 text-slate-300 hover:text-cp-pink text-lg sm:text-xl transition"><i class="fa-solid fa-forward-step"></i></button>
+                </div>
+            </div>
+
+            <!-- DOCK APPS DEROULANT PERSONNALISABLE -->
+            <div class="bg-cp-card border-2 border-cp-yellow/40 rounded-2xl p-3 flex-grow flex flex-col justify-between">
+                <div class="flex justify-between items-center mb-2 px-1">
+                    <span class="font-orbitron text-[10px] sm:text-xs font-bold text-cp-yellow uppercase tracking-wider">
+                        <i class="fa-solid fa-cubes mr-1"></i> RACCOURCIS APPLICATIONS
+                    </span>
+                    <button onclick="openAddModal()" class="text-[10px] sm:text-xs font-orbitron bg-cp-yellow text-black font-extrabold px-2 sm:px-2.5 py-0.5 sm:py-1 rounded hover:bg-yellow-300 transition">
+                        + GERER
+                    </button>
+                </div>
+
+                <!-- Liste Déroulante d'applications -->
+                <div id="apps-dock" class="flex gap-2 sm:gap-3 overflow-x-auto pb-1 pt-1">
+                    <!-- Généré dynamiquement par JS -->
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- PIED DE PAGE (UNIQUEMENT DISTANCE PARCOURUE) -->
+    <footer class="bg-cp-card border-t border-cp-border rounded-xl px-4 py-1.5 sm:py-2 flex justify-center items-center font-orbitron text-xs sm:text-sm mt-2 sm:mt-0">
+        <div id="trip-odometer" class="text-cp-yellow font-black tracking-widest flex items-center gap-2">
+            <i class="fa-solid fa-route"></i> DIST: <span id="odometer-value" class="text-white">0.0</span> KM
+        </div>
+    </footer>
+
+    <!-- MODAL GESTION APPS -->
+    <div id="app-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+        <div class="bg-cp-card border-2 border-cp-yellow rounded-2xl p-4 sm:p-6 max-w-md w-full glow-yellow font-orbitron">
+            <h3 class="text-base sm:text-lg font-bold text-cp-yellow mb-3 sm:mb-4">AJOUTER UNE APPLICATION</h3>
+            
+            <div class="space-y-3 sm:space-y-4">
+                <div>
+                    <label class="text-slate-400 block text-[10px] sm:text-xs mb-1">CHOISIR PARMI LES APPS PRE-CONFIGURÉES :</label>
+                    <select id="preset-app-select" onchange="fillPresetData()" class="w-full bg-black/90 border border-cp-border p-2 sm:p-2.5 rounded text-white focus:border-cp-yellow outline-none text-xs sm:text-sm font-semibold">
+                        <option value="">-- Sélectionnez une application --</option>
+                        <option value='{"name":"Waze","url":"waze://","icon":"fa-location-dot","color":"text-cyan-400 border-cyan-400/40"}'>Waze</option>
+                        <option value='{"name":"Google Maps","url":"comgooglemaps://","icon":"fa-map-location-dot","color":"text-blue-400 border-blue-400/40"}'>Google Maps</option>
+                        <option value='{"name":"Spotify","url":"spotify://","icon":"fa-spotify","color":"text-green-400 border-green-400/40"}'>Spotify</option>
+                        <option value='{"name":"Apple Music","url":"music://","icon":"fa-music","color":"text-pink-400 border-pink-400/40"}'>Apple Music</option>
+                        <option value='{"name":"Apple Maps","url":"maps://","icon":"fa-location-arrow","color":"text-indigo-400 border-indigo-400/40"}'>Apple Maps</option>
+                        <option value='{"name":"YouTube","url":"youtube://","icon":"fa-youtube","color":"text-red-500 border-red-500/40"}'>YouTube</option>
+                        <option value='{"name":"WhatsApp","url":"whatsapp://","icon":"fa-whatsapp","color":"text-emerald-400 border-emerald-400/40"}'>WhatsApp</option>
+                        <option value='{"name":"Téléphone","url":"tel:","icon":"fa-phone","color":"text-green-500 border-green-500/40"}'>Téléphone</option>
+                    </select>
+                </div>
+
+                <div class="border-t border-cp-border pt-3">
+                    <label class="text-slate-400 block text-[10px] sm:text-xs mb-1">OU RENSEIGNER UN NOM & URL SCHEME :</label>
+                    <input id="new-app-name" type="text" placeholder="Ex: Radio FM" class="w-full bg-black/80 border border-cp-border p-2 rounded text-white focus:border-cp-yellow outline-none text-xs sm:text-sm mb-2">
+                    <input id="new-app-url" type="text" placeholder="Ex: appscheme://" class="w-full bg-black/80 border border-cp-border p-2 rounded text-white focus:border-cp-yellow outline-none text-xs sm:text-sm">
+                </div>
+            </div>
+
+            <div class="flex gap-2 sm:gap-3 mt-4 sm:mt-6">
+                <button onclick="saveNewApp()" class="flex-1 bg-cp-yellow text-black font-black py-1.5 sm:py-2 text-xs sm:text-sm rounded hover:bg-yellow-300 transition">AJOUTER</button>
+                <button onclick="closeAddModal()" class="flex-1 bg-slate-800 text-slate-300 font-bold py-1.5 sm:py-2 text-xs sm:text-sm rounded hover:bg-slate-700 transition">ANNULER</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    
+    <script>
+        let map, userMarker;
+        let hasInitialPosition = false;
+
+        function initMap(lat, lng) {
+            map = L.map('real-time-map', {
+                zoomControl: false,
+                attributionControl: false
+            }).setView([lat, lng], 16);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                subdomains: ['a', 'b', 'c']
+            }).addTo(map);
+
+            const cyberpunkIcon = L.divIcon({
+                className: 'custom-cp-marker',
+                html: `<div style="
+                    width: 20px; 
+                    height: 20px; 
+                    background: #FCEE09; 
+                    border: 3px solid #00F0FF; 
+                    border-radius: 50%; 
+                    box-shadow: 0 0 15px #00F0FF, 0 0 25px #FCEE09;
+                "></div>`,
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+            });
+
+            userMarker = L.marker([lat, lng], { icon: cyberpunkIcon }).addTo(map);
+
+            setTimeout(() => {
+                map.invalidateSize();
+            }, 200);
+
+            window.addEventListener('resize', () => {
+                if (map) map.invalidateSize();
+            });
+        }
+
+        function openWaze() {
+            window.location.href = "waze://";
+            setTimeout(() => {
+                window.open("https://www.waze.com/ul", "_blank");
+            }, 1000);
+        }
+
+        function updateDateTime() {
+            const now = new Date();
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const dateStr = now.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short' }).toUpperCase();
+            
+            document.getElementById('header-datetime').textContent = `${hours}:${minutes} - ${dateStr}`;
+        }
+        setInterval(updateDateTime, 1000);
+        updateDateTime();
+
+        const defaultApps = [
+            { name: "Waze", url: "waze://", icon: "fa-location-dot", color: "text-cyan-400 border-cyan-400/40" },
+            { name: "Google Maps", url: "comgooglemaps://", icon: "fa-map-location-dot", color: "text-blue-400 border-blue-400/40" },
+            { name: "Spotify", url: "spotify://", icon: "fa-spotify", color: "text-green-400 border-green-400/40" },
+            { name: "Apple Music", url: "music://", icon: "fa-music", color: "text-pink-400 border-pink-400/40" },
+            { name: "Apple Maps", url: "maps://", icon: "fa-location-arrow", color: "text-indigo-400 border-indigo-400/40" }
+        ];
+
+        function getStoredApps() {
+            const stored = localStorage.getItem('cp_apps');
+            return stored ? JSON.parse(stored) : defaultApps;
+        }
+
+        function renderDock() {
+            const dock = document.getElementById('apps-dock');
+            const apps = getStoredApps();
+            dock.innerHTML = '';
+
+            apps.forEach((app, index) => {
+                const appCard = document.createElement('div');
+                appCard.className = `flex-shrink-0 bg-black/70 border ${app.color} p-2 sm:p-3 rounded-xl flex flex-col items-center justify-center w-20 h-20 sm:w-24 sm:h-24 cursor-pointer hover:scale-105 active:scale-95 transition relative group`;
+                appCard.onclick = () => window.location.href = app.url;
+
+                appCard.innerHTML = `
+                    <button onclick="event.stopPropagation(); removeApp(${index});" class="absolute -top-1.5 -right-1.5 sm:-top-2 sm:-right-2 bg-red-500 text-white rounded-full w-4 h-4 sm:w-5 sm:h-5 text-[9px] sm:text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                    <i class="fa-solid ${app.icon} text-xl sm:text-2xl ${app.color.split(' ')[0]} mb-1"></i>
+                    <span class="text-[10px] sm:text-xs font-orbitron font-bold text-slate-200 truncate w-full text-center">${app.name}</span>
+                `;
+                dock.appendChild(appCard);
+            });
+        }
+
+        function openAddModal() {
+            document.getElementById('app-modal').classList.remove('hidden');
+        }
+
+        function closeAddModal() {
+            document.getElementById('app-modal').classList.add('hidden');
+            document.getElementById('preset-app-select').value = "";
+            document.getElementById('new-app-name').value = "";
+            document.getElementById('new-app-url').value = "";
+        }
+
+        function fillPresetData() {
+            const select = document.getElementById('preset-app-select');
+            if (select.value) {
+                const data = JSON.parse(select.value);
+                document.getElementById('new-app-name').value = data.name;
+                document.getElementById('new-app-url').value = data.url;
+            }
+        }
+
+        function saveNewApp() {
+            const name = document.getElementById('new-app-name').value.trim();
+            const url = document.getElementById('new-app-url').value.trim();
+            const select = document.getElementById('preset-app-select');
+
+            if (!name || !url) {
+                alert("Veuillez remplir le nom et le schéma d'URL.");
+                return;
+            }
+
+            let icon = "fa-cubes";
+            let color = "text-yellow-400 border-yellow-400/40";
+
+            if (select.value) {
+                const presetData = JSON.parse(select.value);
+                icon = presetData.icon;
+                color = presetData.color;
+            }
+
+            const apps = getStoredApps();
+            apps.push({ name, url, icon, color });
+            localStorage.setItem('cp_apps', JSON.stringify(apps));
+
+            renderDock();
+            closeAddModal();
+        }
+
+        function removeApp(index) {
+            const apps = getStoredApps();
+            apps.splice(index, 1);
+            localStorage.setItem('cp_apps', JSON.stringify(apps));
+            renderDock();
+        }
+
+        let isPlaying = false;
+        function togglePlay() {
+            isPlaying = !isPlaying;
+            document.getElementById('play-icon').className = isPlaying ? "fa-solid fa-pause" : "fa-solid fa-play";
+        }
+        function prevSong() {}
+        function nextSong() {}
+
+        let simInterval = null;
+        let isSimulating = false;
+        let totalDistance = 0.0;
+
+        function toggleSim() {
+            const btn = document.getElementById('sim-speed-btn');
+            const speedDisplay = document.getElementById('speed-display');
+
+            if (!isSimulating) {
+                isSimulating = true;
+                btn.textContent = "STOP SIM";
+                btn.classList.add("bg-red-500/30", "text-red-400");
+                simInterval = setInterval(() => {
+                    const simSpeed = Math.floor(Math.random() * 25) + 65;
+                    speedDisplay.textContent = simSpeed;
+                    
+                    if (map && userMarker) {
+                        const currentLatLng = userMarker.getLatLng();
+                        const newLat = currentLatLng.lat + 0.00012;
+                        const newLng = currentLatLng.lng + 0.00012;
+                        userMarker.setLatLng([newLat, newLng]);
+                        map.panTo([newLat, newLng], { animate: true });
+                    }
+
+                    totalDistance += (simSpeed / 3600) * 1.5;
+                    document.getElementById('odometer-value').textContent = totalDistance.toFixed(1);
+                }, 1500);
+            } else {
+                isSimulating = false;
+                clearInterval(simInterval);
+                btn.textContent = "TEST SIM";
+                btn.classList.remove("bg-red-500/30", "text-red-400");
+                speedDisplay.textContent = "0";
+            }
+        }
+
+        window.addEventListener('load', () => {
+            renderDock();
+
+            if ("geolocation" in navigator) {
+                navigator.geolocation.watchPosition(
+                    (pos) => {
+                        const lat = pos.coords.latitude;
+                        const lng = pos.coords.longitude;
+
+                        if (!hasInitialPosition) {
+                            initMap(lat, lng);
+                            hasInitialPosition = true;
+                        } else if (map && userMarker && !isSimulating) {
+                            userMarker.setLatLng([lat, lng]);
+                            map.setView([lat, lng], 16, { animate: true });
+                        }
+
+                        if (!isSimulating && pos.coords.speed !== null) {
+                            const kmh = Math.round(pos.coords.speed * 3.6);
+                            document.getElementById('speed-display').textContent = kmh;
+                        }
+                    },
+                    (err) => {
+                        console.warn("GPS non disponible ou refusé, position par défaut.");
+                        if (!hasInitialPosition) {
+                            initMap(48.8566, 2.3522);
+                            hasInitialPosition = true;
+                        }
+                    },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                );
+            } else {
+                initMap(48.8566, 2.3522);
+            }
+
+            if ('getBattery' in navigator) {
+                navigator.getBattery().then(battery => {
+                    function updateBattery() {
+                        const level = Math.round(battery.level * 100);
+                        document.getElementById('battery-level').textContent = `${level}%`;
+                    }
+                    updateBattery();
+                    battery.addEventListener('levelchange', updateBattery);
+                });
+            }
+        });
+    </script>
+</body>
+</html>
